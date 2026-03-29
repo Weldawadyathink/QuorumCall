@@ -26,7 +26,7 @@ struct ManageQuorumsView: View {
             }
         } detail: {
             if let quorum = selection {
-                QuorumDetailView(quorum: quorum, hotkeyManager: hotkeyManager)
+                QuorumDetailView(quorum: quorum, hotkeyManager: hotkeyManager, onDelete: { deleteQuorum(quorum) })
                     .id(quorum.id)
             } else {
                 ContentUnavailableView(
@@ -59,6 +59,7 @@ struct ManageQuorumsView: View {
 struct QuorumDetailView: View {
     @Bindable var quorum: Quorum
     var hotkeyManager: HotkeyManager
+    var onDelete: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @State private var isRecording = false
@@ -119,6 +120,15 @@ struct QuorumDetailView: View {
         }
         .formStyle(.grouped)
         .navigationTitle(quorum.name)
+        .toolbar {
+            ToolbarItem(placement: .destructiveAction) {
+                Button(role: .destructive) {
+                    onDelete?()
+                } label: {
+                    Label("Delete Quorum", systemImage: "trash")
+                }
+            }
+        }
         .onDisappear { stopRecording() }
     }
 
