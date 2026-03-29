@@ -1,10 +1,16 @@
 import AppKit
 import ApplicationServices
+import CoreGraphics
+
+// Private API: gets the CGWindowID for an AXUIElement without Screen Recording permission.
+@_silgen_name("_AXUIElementGetWindow")
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
 
 struct FocusedWindowSnapshot {
     let bundleID: String
     let appName: String
     let windowTitle: String
+    let cgWindowID: UInt32?
 }
 
 @Observable
@@ -41,7 +47,7 @@ final class WindowManager {
         let appName = app.localizedName ?? bundleID
 
         guard AXIsProcessTrusted() else {
-            return FocusedWindowSnapshot(bundleID: bundleID, appName: appName, windowTitle: "")
+            return FocusedWindowSnapshot(bundleID: bundleID, appName: appName, windowTitle: "", cgWindowID: nil)
         }
 
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
@@ -49,13 +55,16 @@ final class WindowManager {
         let err = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &windowRef)
 
         var title = ""
+        var windowID: UInt32? = nil
         if err == .success, let axWindow = windowRef {
+            let axWin = axWindow as! AXUIElement
             var titleRef: CFTypeRef?
-            AXUIElementCopyAttributeValue(axWindow as! AXUIElement, kAXTitleAttribute as CFString, &titleRef)
+            AXUIElementCopyAttributeValue(axWin, kAXTitleAttribute as CFString, &titleRef)
             title = (titleRef as? String) ?? ""
+            windowID = cgWindowID(for: axWin)
         }
 
-        return FocusedWindowSnapshot(bundleID: bundleID, appName: appName, windowTitle: title)
+        return FocusedWindowSnapshot(bundleID: bundleID, appName: appName, windowTitle: title, cgWindowID: windowID)
     }
 
     func activate(quorum: Quorum) {
@@ -86,9 +95,17 @@ final class WindowManager {
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         var windowsRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-              let windows = windowsRef as? [AXUIElement] else { return }
+              let axWindows = windowsRef as? [AXUIElement] else { return }
 
-        let best = windows
+        // Try CGWindowID match first — stable across title changes
+        if let storedID = record.cgWindowID,
+           let axWin = axWindows.first(where: { cgWindowID(for: $0) == storedID }) {
+            AXUIElementPerformAction(axWin, kAXRaiseAction as CFString)
+            return
+        }
+
+        // Fall back to fuzzy title matching
+        let best = axWindows
             .compactMap { axWin -> (AXUIElement, Int)? in
                 var titleRef: CFTypeRef?
                 AXUIElementCopyAttributeValue(axWin, kAXTitleAttribute as CFString, &titleRef)
@@ -96,11 +113,18 @@ final class WindowManager {
                 return (axWin, titleMatchScore(candidate: title, target: record.windowTitle))
             }
             .max(by: { $0.1 < $1.1 })
-            .map { $0.0 }
 
-        if let win = best {
+        if let (win, _) = best {
             AXUIElementPerformAction(win, kAXRaiseAction as CFString)
+            // Refresh stored CGWindowID so future activations use the stable path
+            record.cgWindowID = cgWindowID(for: win)
         }
+    }
+
+    private func cgWindowID(for element: AXUIElement) -> UInt32? {
+        var windowID = CGWindowID(0)
+        guard _AXUIElementGetWindow(element, &windowID) == .success else { return nil }
+        return windowID
     }
 
     private func titleMatchScore(candidate: String, target: String) -> Int {

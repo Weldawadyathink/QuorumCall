@@ -51,14 +51,19 @@ struct MenuContentView: View {
 
     private func addWindow(snapshot: FocusedWindowSnapshot, to quorum: Quorum) {
         let isDuplicate = quorum.windows.contains {
-            $0.appBundleID == snapshot.bundleID && $0.windowTitle == snapshot.windowTitle
+            // Prefer CGWindowID match when available — handles title-changed windows
+            if let snapshotID = snapshot.cgWindowID, let windowID = $0.cgWindowID {
+                return snapshotID == windowID
+            }
+            return $0.appBundleID == snapshot.bundleID && $0.windowTitle == snapshot.windowTitle
         }
         guard !isDuplicate else { return }
 
         let win = QuorumWindow(
             appBundleID: snapshot.bundleID,
             appName: snapshot.appName,
-            windowTitle: snapshot.windowTitle
+            windowTitle: snapshot.windowTitle,
+            cgWindowID: snapshot.cgWindowID
         )
         win.quorum = quorum
         modelContext.insert(win)
