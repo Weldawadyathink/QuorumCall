@@ -51,7 +51,7 @@ struct QuorumCallApp: App {
                 .environment(coordinator.hotkeyManager)
                 .modelContainer(coordinator.modelContainer)
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
 
         Window("Manage Quorums", id: "manage-quorums") {
             ManageQuorumsView()
